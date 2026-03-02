@@ -26,8 +26,8 @@ A high-performance **p5.js (WEBGL)** engine.
 - **Dynamic Physics:** Flowers and trees utilize sine-wave mathematics to simulate wind sway and chaotic turbulence.
 
 ## 🎥 Video Demonstration
-Due to the high-fidelity nature of the project, a raw video demonstration is available for download via the project's releases:
-[**Download Raw Demo Video (.MOV)**](https://github.com/Dafu-Liu/Com-Objects-SceneEcho/releases/download/v1.0.0/IMG_4556.MOV)
+Due to the high-fidelity nature of the project, a raw video demonstration is available for download in the **Releases** section:
+[**View Releases and Download Demo Video**](https://github.com/Dafu-Liu/Com-Objects-SceneEcho/releases)
 
 ## 🚀 Getting Started
 1. **Flash the Arduino:** Upload the firmware in `src/main.cpp` to your Arduino Uno.
