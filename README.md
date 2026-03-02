@@ -25,6 +25,10 @@ A high-performance **p5.js (WEBGL)** engine.
 - **Hybrid Input System:** Features a dual-mode interaction model allowing for both Arduino Sensor input and a Mouse-Y fallback.
 - **Dynamic Physics:** Flowers and trees utilize sine-wave mathematics to simulate wind sway and chaotic turbulence.
 
+## 🎥 Video Demonstration
+Due to the high-fidelity nature of the project, a raw video demonstration is available for download via the project's releases:
+[**Download Raw Demo Video (.MOV)**](https://github.com/Dafu-Liu/Com-Objects-SceneEcho/releases/download/v1.0.0/IMG_4556.MOV)
+
 ## 🚀 Getting Started
 1. **Flash the Arduino:** Upload the firmware in `src/main.cpp` to your Arduino Uno.
 2. **Connect:** Open `index.html` in a Web Serial compatible browser (Chrome or Edge).
