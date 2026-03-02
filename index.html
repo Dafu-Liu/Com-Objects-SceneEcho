@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECHOES: THE RUGGED DIORAMA</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Georgia', serif; }
+        #start-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 999;
+            transition: opacity 1s;
+        }
+        #start-screen h1 { font-size: 80px; color: #fff; letter-spacing: 20px; font-weight: 100; margin-bottom: 40px; }
+        #startBtn { 
+            background: transparent; border: 2px solid rgba(255,255,255,0.5); color: #fff; 
+            padding: 20px 80px; font-size: 20px; letter-spacing: 10px; cursor: pointer; transition: 0.5s;
+        }
+        #startBtn:hover { background: #fff; color: #000; box-shadow: 0 0 80px rgba(255,255,255,0.4); }
+        #hud {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 180px;
+            background: linear-gradient(to top, rgba(0,0,0,1) 50%, transparent);
+            display: none; justify-content: center; align-items: flex-end;
+            padding-bottom: 30px; gap: 20px; z-index: 10; pointer-events: none;
+        }
+        .panel { 
+            pointer-events: auto; background: rgba(10, 15, 20, 0.95); 
+            border: 1px solid rgba(255,255,255,0.1); padding: 15px; 
+            border-radius: 4px; backdrop-filter: blur(30px); min-width: 160px; text-align: center;
+        }
+        h2 { margin: 0 0 10px 0; font-size: 9px; color: #555; letter-spacing: 3px; text-transform: uppercase; }
+        .val { font-size: 16px; color: #fff; font-weight: bold; font-family: monospace; }
+        button.hud-btn {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); 
+            color: #888; padding: 10px; cursor: pointer; width: 100%; margin-top: 8px; font-size: 10px; transition: 0.3s;
+        }
+        button.hud-btn:hover { background: #fff; color: #000; }
+        button.hud-btn.active { background: #fff; color: #000; border-color: #fff; }
+        #title-overlay {
+            position: absolute; top: 60px; left: 60px; pointer-events: none; display: none;
+        }
+        #title-overlay h1 { font-size: 64px; color: #fff; margin: 0; letter-spacing: 15px; font-weight: 100; }
+        #title-overlay p { font-size: 14px; color: #666; margin: 10px 0 0 0; letter-spacing: 8px; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div id="start-screen">
+        <h1>ECHOES</h1>
+        <button id="startBtn">BEGIN</button>
+    </div>
+    <div id="title-overlay">
+        <h1 id="biomeTitle">GOLDEN FIELD</h1>
+        <p id="biomeState">PEACEFUL STATE</p>
+    </div>
+    <div id="hud">
+        <div class="panel">
+            <h2>INPUT</h2>
+            <button id="btnMouse" class="hud-btn active">MOUSE MODE</button>
+            <button id="btnSensor" class="hud-btn">SENSOR MODE</button>
+        </div>
+        <div class="panel">
+            <h2>CHAOS</h2>
+            <div class="val" id="chaosTxt">0%</div>
+            <input type="range" id="chaosSlider" min="0" max="100" value="0" style="width:100%">
+        </div>
+        <div class="panel">
+            <h2>TUNING</h2>
+            <div class="val" id="sensorRaw">-- cm</div>
+            <input type="range" id="threshSlider" min="0" max="400" value="155">
+            <div id="threshLabel" style="font-size:10px; color:#fff; margin-top:5px;">TRIGGER < 155cm</div>
+        </div>
+        <div class="panel">
+            <h2>REALM</h2>
+            <button id="btnNext" class="hud-btn">NEXT (SPACE)</button>
+        </div>
+    </div>
+
+<script>
+let isStarted = false, chaos = 0.0, targetChaos = 0.0, inputMode = 'mouse', currentBiome = 0;
+let biomes = ["THE GOLDEN FIELD", "THE ELDER VILLAGE", "THE HIGHLAND PEAKS", "THE ABYSSAL OCEAN"];
+let sensorTrigger = 155, port, reader, models = {}, worldInstances = [], terrain = [];
+const VOXEL_UNIT = 15; // Massive scale
+
+function setup() {
+    createCanvas(windowWidth, windowHeight, WEBGL);
+    setAttributes('antialias', true);
+    document.getElementById('startBtn').addEventListener('click', () => {
+        isStarted = true;
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('hud').style.display = 'flex';
+        document.getElementById('title-overlay').style.display = 'block';
+    });
+    document.getElementById('btnNext').addEventListener('click', () => { currentBiome = (currentBiome + 1) % 4; generateWorld(currentBiome); });
+    document.getElementById('btnMouse').addEventListener('click', () => { inputMode = 'mouse'; setActive('btnMouse'); });
+    document.getElementById('btnSensor').addEventListener('click', () => { inputMode = 'sensor'; setActive('btnSensor'); connectSerial(); });
+    document.getElementById('threshSlider').addEventListener('input', (e) => { sensorTrigger = e.target.value; document.getElementById('threshLabel').innerText = `TRIGGER < ${sensorTrigger}cm`; });
+    
+    window.addEventListener('keydown', (e) => { if(e.code === 'Space') { currentBiome = (currentBiome + 1) % 4; generateWorld(currentBiome); } });
+
+    buildModelLibrary();
+    generateWorld(0);
+}
+
+function setActive(id) { document.querySelectorAll('.hud-btn').forEach(b => b.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+
+function draw() {
+    if(!isStarted) { background(0); return; }
+    if (inputMode === 'mouse') { targetChaos = map(constrain(mouseY, 0, height), height, 0, 0.0, 1.0); }
+    chaos = lerp(chaos, targetChaos, 0.04);
+    document.getElementById('chaosSlider').value = chaos * 100;
+    document.getElementById('chaosTxt').innerText = Math.floor(chaos * 100) + "%";
+    document.getElementById('biomeTitle').innerText = biomes[currentBiome];
+    document.getElementById('biomeState').innerText = chaos > 0.5 ? "CHAOTIC REALM" : "PEACEFUL REALM";
+
+    // CAMERA FIX: Sky is -Y. Camera at -1200 looking down to 0. Standard p5 Up vector (0,1,0).
+    let t = millis() * 0.00008;
+    let hMult = currentBiome === 2 ? 3.0 : 1.8; 
+    let camDist = 1400 * hMult;
+    let camY = -1000 * hMult; 
+    let camX = cos(t) * camDist;
+    let camZ = sin(t) * camDist;
+    
+    if(chaos > 0.6) { camX += random(-15,15); camY += random(-15,15); }
+    camera(camX, camY, camZ, 0, 0, 0, 0, 1, 0); 
+
+    background(lerpColor(color(100, 180, 255), color(25, 5, 5), chaos));
+    ambientLight(150);
+    let sunCol = lerpColor(color(255, 255, 230), color(255, 40, 0), chaos);
+    directionalLight(sunCol, 0.5, 1, -0.5);
+    pointLight(sunCol, 0, -1000, 0);
+
+    noStroke();
+    
+    // Draw Rugged Terrain (Grows UP into -Y)
+    drawTerrain();
+    // Draw Objects
+    drawInstances();
+    // Draw Water
+    if(currentBiome === 3 || currentBiome === 2) drawWater();
+}
+
+function generateWorld(id) {
+    worldInstances = []; terrain = []; currentBiome = id;
+    let size = 1500, step = 100;
+    for(let x=-size; x<=size; x+=step) {
+        for(let z=-size; z<=size; z+=step) {
+            let h = 0, type = 'grass';
+            // RUGGED TERRAIN LOGIC
+            if (id === 0) h = noise(x*0.002, z*0.002) * 200; // Hills
+            else if (id === 1) h = noise(x*0.004, z*0.004) * 250; // Valleys
+            else if (id === 2) { h = noise(x*0.003, z*0.003) * 1600 - 400; if(h > 400) type = 'stone'; else if(h < 0) { h = -60; type = 'water'; } }
+            else if (id === 3) { h = -100; type = 'sand'; }
+            terrain.push({x, z, h, type});
+        }
+    }
+    if (id === 0) { // FIELD
+        worldInstances.push({type:'ruin_arch', x:0, y:0, z:0, s:6.0, rot:0});
+        for(let i=0; i<600; i++) {
+            let x = random(-size,size), z = random(-size,size);
+            let h = noise(x*0.002, z*0.002) * 200;
+            if(dist(x,z,0,0) < 400) continue;
+            worldInstances.push({type:'flower', x, y:h, z, s:4.5, rot:random(TWO_PI), c:random([[255,80,80], [255,255,80], [80,120,255], [200,80,255], [255,255,255]])});
+        }
+    } else if (id === 1) { // VILLAGE (OPTIMIZED FOR PERFORMANCE)
+        for(let i=0; i<15; i++) {
+            let x = random(-1000,1000), z = random(-1000,1000);
+            let h = noise(x*0.004, z*0.004) * 250; // Match terrain height
+            worldInstances.push({type:'cottage', x, y:h, z, s:10.0, rot:random(TWO_PI)});
+        }
+        for(let i=0; i<45; i++) { // Massive Trees
+            let x = random(-1500,1500), z = random(-1500,1500);
+            let h = noise(x*0.004, z*0.004) * 350;
+            worldInstances.push({type:'tree', x, y:h, z, s:random(12.0, 16.0), rot:random(TWO_PI)});
+        }
+        for(let i=0; i<12; i++) worldInstances.push({type:'deer', x:random(-1000,1000), y:0, z:random(-1000,1000), s:5.0, rot:random(TWO_PI)});
+    } else if (id === 2) { // HIGHLANDS (CORRECT UP)
+        for(let i=0; i<150; i++) { 
+            let x = random(-size,size), z = random(-size,size);
+            let h = noise(x*0.003, z*0.003)*1600 - 400; 
+            if(h > 250) worldInstances.push({type:'rock', x, y:h, z, s:15, rot:random(TWO_PI)}); 
+        }
+    } else if (id === 3) {
+        worldInstances.push({type:'boat', x:0, y:-30, z:0, s:15, rot:PI/6});
+        for(let i=0; i<200; i++) worldInstances.push({type:'coral', x:random(-size,size), y:50, z:random(-size,size), s:8, rot:random(TWO_PI)});
+        for(let i=0; i<10; i++) worldInstances.push({type:'island', x:random(800,1600)*(random()<0.5?1:-1), y:50, z:random(800,1600)*(random()<0.5?1:-1), s:30, rot:0});
+    }
+}
+
+function drawTerrain() {
+    for(let t of terrain) {
+        if(t.type === 'water' || currentBiome === 3) continue;
+        push(); 
+        // Standard Coordinate Fix: Translate to -h/2 to grow into -Y sky
+        translate(t.x, -t.h/2, t.z); 
+        if(t.type==='stone') fill(lerpColor(color(85), color(25), chaos)); else if(t.type==='sand') fill(210,185,130); else fill(lerpColor(color(40,120,20), color(40,30,10), chaos));
+        box(100, t.h, 100);
+        pop();
+    }
+}
+
+function drawWater() {
+    for(let t of terrain) {
+        if(t.type === 'water' || currentBiome === 3) {
+            push(); translate(t.x, 0, t.z); 
+            let wave = sin(t.x*0.01 + millis()*0.002 + chaos*5) * (currentBiome===3?100:30);
+            translate(0, wave, 0); fill(0, 120, 220, 100); box(100, 10, 100); pop();
+        }
+    }
+}
+
+function drawInstances() {
+    for(let obj of worldInstances) {
+        push();
+        let py = -obj.y; 
+        if(obj.type === 'boat') py = sin(obj.x*0.01 + millis()*0.002 + chaos*5)*100;
+        translate(obj.x, py, obj.z); rotateY(obj.rot);
+        if(['flower','tree','deer','coral'].includes(obj.type)) { let sway = sin(millis()*0.002 + obj.x + chaos*10) * (chaos>0.5 ? 0.35 : 0.1); rotateZ(sway); rotateX(sway * 0.5); }
+        if(obj.type === 'boat') { rotateX(sin(millis()*0.001)*0.1); rotateZ(sin(millis()*0.0013)*0.12); }
+        renderModel(models[obj.type] || models.ruin_arch, obj.s, obj.c);
+        pop();
+    }
+}
+
+function renderModel(voxels, scale, colorOverride) {
+    if(!voxels) return;
+    for(let v of voxels) {
+        push(); 
+        // GROW UP: Voxel Y is negative
+        translate(v.x * scale, v.y * scale, v.z * scale);
+        let c = v.c; if(colorOverride && v.tag === 'petal') c = colorOverride;
+        if(chaos > 0.5) { if(v.tag === 'leaf' || v.tag === 'petal') fill(255,30,0); else if(v.tag === 'wood' || v.tag === 'fur') fill(30,15,5); else fill(lerpColor(color(c), color(40,0,0), 0.75)); }
+        else { fill(c); }
+        box(scale * VOXEL_UNIT * 0.1); pop();
+    }
+}
+
+function buildModelLibrary() {
+    models.flower = buildVoxelFlower(); models.tree = buildVoxelTree(); models.cottage = buildVoxelHouse();
+    models.ruin_arch = buildVoxelArch(); models.rock = buildVoxelRock(); models.coral = buildVoxelCoral();
+    models.deer = buildVoxelDeer(); models.boat = buildVoxelBoat(); models.island = buildVoxelIsland();
+}
+
+function buildVoxelTree() {
+    let v = []; for(let y=0; y<25; y++) { v.push({x:0, y:-y, z:0, c:[80,60,40], tag:'wood'}); v.push({x:1, y:-y, z:0, c:[70,50,30], tag:'wood'}); }
+    for(let x=-4; x<=5; x++) for(let y=-4; y<=4; y++) for(let z=-4; z<=5; z++) if(dist(x,y,z,0.5,0,0.5) < 4.2) v.push({x, y:-25+y, z, c:[30,130,30], tag:'leaf'});
+    return v;
+}
+function buildVoxelHouse() {
+    let v = []; for(let x=-3;x<=3;x++) for(let z=-3;z<=3;z++) for(let y=0;y<8;y++) if(abs(x)===3||abs(z)===3) v.push({x,y:-y,z,c:[210,200,190], tag:'wall'});
+    for(let y=0; y<6; y++) for(let x=-5+y; x<=5-y; x++) for(let z=-5+y; z<=5-y; z++) v.push({x,y:-8-y,z,c:[110,45,40], tag:'roof'});
+    v.push({x:0,y:-4,z:3,c:[255,255,80], tag:'light'}); return v;
+}
+function buildVoxelArch() {
+    let v = []; for(let y=0; y<35; y++) { for(let x=-2;x<=2;x++) for(let z=-3;z<=3;z++) { v.push({x:-16+x, y:-y, z:z, c:[130,130,130], tag:'stone'}); v.push({x:16+x, y:-y, z:z, c:[130,130,130], tag:'stone'}); } } 
+    for(let x=-16; x<=16; x++) { let y = -35 - sin(map(x,-16,16,0,PI))*15; for(let z=-3;z<=3;z++) v.push({x,y,z,c:[155,155,155], tag:'stone'}); }
+    return v;
+}
+function buildVoxelFlower() {
+    let v=[]; for(let y=0; y<8; y++) v.push({x:0,y:-y,z:0,c:[0,170,0]}); v.push({x:0,y:-8,z:0,c:[255,200,0]});
+    for(let i=0; i<8; i++) { let a=i*PI/4; v.push({x:cos(a), y:-8, z:sin(a), c:[255,255,255], tag:'petal'}); v.push({x:cos(a)*2, y:-7, z:sin(a)*2, c:[255,255,255], tag:'petal'}); }
+    return v;
+}
+function buildVoxelBoat() {
+    let v=[]; for(let x=-12;x<=12;x++) { let hullW=4-abs(x)*0.25; for(let z=-hullW;z<=hullW;z++) v.push({x,y:abs(z)*0.6,z,c:[95,50,15],tag:'hull'}); }
+    for(let y=0;y<20;y++) v.push({x:0,y:-y-1,z:0,c:[130,90,40],tag:'wood'});
+    for(let x=1;x<10;x++) for(let y=0;y<15;y++) v.push({x,y:-5-y,z:sin(y*0.3)*3,c:[240,240,235],tag:'cloth'});
+    return v;
+}
+function buildVoxelDeer() {
+    let v=[]; 
+    for(let x=-3;x<=3;x++) for(let y=0;y<3;y++) for(let z=-1;z<=1;z++) v.push({x,y:-8-y,z,c:[135,65,15],tag:'fur'});
+    for(let y=0;y<8;y++) { v.push({x:-3,y:-y,z:1,c:[100,45,5]}); v.push({x:3,y:-y,z:1,c:[100,45,5]}); v.push({x:-3,y:-y,z:-1,c:[100,45,5]}); v.push({x:3,y:-y,z:-1,c:[100,45,5]}); }
+    for(let y=0;y<6;y++) v.push({x:4,y:-10-y,z:0,c:[135,65,15],tag:'fur'});
+    for(let x=0;x<3;x++) v.push({x:4+x,y:-16,z:0,c:[135,65,15],tag:'fur'});
+    v.push({x:4,y:-18,z:2,c:[200,200,200]}); v.push({x:4,y:-18,z:-2,c:[200,200,200]});
+    return v;
+}
+function buildVoxelIsland() { let v=[]; for(let x=-6;x<=6;x++) for(let z=-6;z<=6;z++) if(dist(x,0,z,0,0,0)<6) v.push({x,y:0,z,c:[200,180,110]}); return v; }
+function buildVoxelRock() { let v=[]; for(let x=-2;x<=2;x++) for(let y=0;y<6;y++) for(let z=-2;z<=2;z++) if(random()>0.3) v.push({x,y:-y,z,c:[100,100,105],tag:'stone'}); return v; }
+function buildVoxelCoral() { let v=[]; let c=[255,random(100,150),255]; for(let y=0;y<12;y++) { v.push({x:0,y:-y,z:0,c:c}); if(y>5){ v.push({x:1,y:-y,z:0,c:c}); v.push({x:-1,y:-y,z:1,c:c}); } } return v; }
+
+async function connectSerial() {
+    if(!navigator.serial) return;
+    try { port = await navigator.serial.requestPort(); await port.open({baudRate:9600});
+        const decoder = new TextDecoderStream(); port.readable.pipeTo(decoder.writable); reader = decoder.readable.getReader();
+        while(true){ const {value,done}=await reader.read(); if(done)break; parseSerial(value); }
+    } catch(e){console.error(e);}
+}
+function parseSerial(chunk) {
+    if(inputMode!=='sensor') return;
+    let lines = chunk.split('\n');
+    for(let line of lines) { let v=parseInt(line.trim()); if(!isNaN(v)) { document.getElementById('sensorRaw').innerText = v + " cm"; if(v < sensorTrigger && v > 0) targetChaos = 1.0; else targetChaos = 0.0; } }
+}
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+</script>
+</body>
+</html>
